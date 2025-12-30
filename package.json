@@ -1,0 +1,32 @@
+{
+    "name": "protools-mcp",
+    "version": "1.0.0",
+    "description": "ProTools MCP Server - 可扩展的工具盒，封装日常脚本",
+    "type": "module",
+    "main": "dist/index.js",
+    "scripts": {
+        "build": "tsc",
+        "dev": "npx tsx src/index.ts",
+        "start": "node dist/index.js"
+    },
+    "keywords": [
+        "mcp",
+        "tools",
+        "merge-files"
+    ],
+    "author": "",
+    "license": "MIT",
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.0.0",
+        "zod": "^3.24.0",
+        "glob": "^11.0.0"
+    },
+    "devDependencies": {
+        "@types/node": "^22.10.0",
+        "tsx": "^4.19.0",
+        "typescript": "^5.7.0"
+    },
+    "engines": {
+        "node": ">=20.0.0"
+    }
+}

@@ -1,0 +1,73 @@
+#!/usr/bin/env node
+/**
+ * ProTools MCP Server 入口
+ * 提供可扩展的工具盒，封装日常脚本
+ */
+
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { MergeFilesInputSchema } from "./types/merge.js";
+import { executeMergeFiles } from "./tools/merge-files.js";
+
+// 创建 MCP Server 实例
+const server = new McpServer({
+    name: "protools",
+    version: "1.0.0",
+});
+
+// ============ 注册工具 ============
+
+// protools_merge_files - 合并多个源代码文件
+server.tool(
+    "protools_merge_files",
+    "合并多个源代码文件，供对话模型作为上下文使用。支持压缩模式（full/compact/skeleton）、扩展名过滤、排除规则、分组输出。",
+    MergeFilesInputSchema.shape,
+    async (params) => {
+        try {
+            const result = await executeMergeFiles(params);
+
+            // 构建返回消息
+            let message = `✅ 已处理 ${result.files_count} 个文件\n`;
+            message += `📊 模式: ${result.mode} | 分组: ${result.grouped ? "是" : "否"}\n`;
+            message += `📦 大小: ${(result.total_bytes / 1024).toFixed(1)} KB\n`;
+
+            if (result.output_path) {
+                message += `📁 输出文件: ${result.output_path}\n`;
+            }
+
+            // 如果有内联内容，返回内容
+            if (result.content) {
+                return {
+                    content: [
+                        { type: "text", text: message },
+                        { type: "text", text: result.content },
+                    ],
+                };
+            }
+
+            // 否则只返回元信息
+            return {
+                content: [{ type: "text", text: message }],
+            };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            return {
+                content: [{ type: "text", text: `❌ 错误: ${errorMessage}` }],
+                isError: true,
+            };
+        }
+    }
+);
+
+// ============ 启动服务器 ============
+
+async function main() {
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    console.error("[ProTools] MCP Server 已启动");
+}
+
+main().catch((error) => {
+    console.error("[ProTools] 启动失败:", error);
+    process.exit(1);
+});
