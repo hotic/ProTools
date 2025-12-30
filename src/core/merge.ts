@@ -2,7 +2,7 @@ import * as path from "node:path";
 import type { MergeMode, ProcessedFile, GroupedFiles } from "../types/merge.js";
 import { readFileContent, getRelativePath } from "./io.js";
 
-// ============ 语言映射表 ============
+// 语言映射表
 
 const LANG_MAP: Record<string, string> = {
     ".kt": "kotlin",
@@ -42,7 +42,7 @@ function getLanguage(filePath: string): string {
     return LANG_MAP[ext] || "";
 }
 
-// ============ 内容处理函数 ============
+// 内容处理函数
 
 /**
  * full 模式：仅规范化空行
@@ -227,7 +227,7 @@ function processSkeleton(content: string, lang: string): string {
     return result.join("\n");
 }
 
-// ============ 主要导出函数 ============
+// 主要导出函数
 
 /**
  * 处理单个文件

@@ -15,7 +15,7 @@ const server = new McpServer({
     version: "1.0.0",
 });
 
-// ============ 注册工具 ============
+// 注册工具
 
 // protools_merge_files - 合并多个源代码文件
 server.tool(
@@ -59,7 +59,7 @@ server.tool(
     }
 );
 
-// ============ 启动服务器 ============
+// 启动服务器
 
 async function main() {
     const transport = new StdioServerTransport();

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// ============ 输入类型 ============
+// 输入类型
 
 /** 压缩模式 */
 export type MergeMode = "full" | "compact" | "skeleton";
@@ -58,7 +58,7 @@ export const MergeFilesInputSchema = z.object({
 
 export type MergeFilesInput = z.infer<typeof MergeFilesInputSchema>;
 
-// ============ 输出类型 ============
+// 输出类型
 
 /** merge_files 工具的输出结果 */
 export interface MergeFilesOutput {
@@ -84,7 +84,7 @@ export interface MergeFilesOutput {
     generated_at: string;
 }
 
-// ============ 内部类型 ============
+// 内部类型
 
 /** 文件处理结果 */
 export interface ProcessedFile {
