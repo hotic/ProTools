@@ -70,6 +70,7 @@
 # OpenAI 配置
 OPENAI_API_KEY=sk-xxx           # OpenAI API Key
 OPENAI_BASE_URL=                # 可选，自定义 API 地址
+OPENAI_REASONING_EFFORT=xhigh   # 推理级别：none | low | medium | high | xhigh
 
 # Gemini 配置
 GEMINI_API_KEY=xxx              # Google AI API Key
