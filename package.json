@@ -4,6 +4,14 @@
     "description": "ProTools MCP - 可扩展的工具盒，封装一些实用工具。",
     "type": "module",
     "main": "dist/index.js",
+    "bin": {
+        "protools-mcp": "dist/index.js"
+    },
+    "files": [
+        "dist",
+        "README.md",
+        "LICENSE"
+    ],
     "scripts": {
         "build": "tsc",
         "dev": "npx tsx src/index.ts",
