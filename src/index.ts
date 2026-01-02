@@ -7,7 +7,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { MergeFilesInputSchema } from "./types/merge.js";
+import { CodeReviewInputSchema } from "./types/review.js";
 import { executeMergeFiles } from "./tools/merge-files.js";
+import { executeCodeReview } from "./tools/code-review.js";
 
 // 创建 MCP Server 实例
 const server = new McpServer({
@@ -53,6 +55,52 @@ server.tool(
             const errorMessage = error instanceof Error ? error.message : String(error);
             return {
                 content: [{ type: "text", text: `❌ 错误: ${errorMessage}` }],
+                isError: true,
+            };
+        }
+    }
+);
+
+// 启动服务器
+
+// protools_code_review - 代码审查
+server.tool(
+    "protools_code_review",
+    "使用 AI 对代码进行审查，支持安全性、性能、质量和可维护性分析。支持 OpenAI GPT-5.2 和 Google Gemini 3 Flash。",
+    CodeReviewInputSchema.shape,
+    async (params) => {
+        try {
+            const result = await executeCodeReview(params);
+
+            // 构建返回消息
+            let message = `代码审查完成\n`;
+            message += `评分: ${result.result.overall_score}/10\n`;
+            message += `审查文件: ${result.result.meta.files_reviewed} 个\n`;
+            message += `发现问题: ${result.result.stats.total_issues} 个\n`;
+            message += `耗时: ${result.result.meta.duration_ms}ms\n`;
+            message += `Provider: ${result.result.meta.provider}\n`;
+            message += `执行模式: ${result.is_concurrent ? "并发" : "单一"}\n`;
+
+            if (result.output_path) {
+                message += `报告文件: ${result.output_path}\n`;
+            }
+
+            // 配置信息（告知调用方）
+            message += `\n--- 配置信息 ---\n`;
+            message += `配置的 Providers: ${result.configured_providers.join(", ")}\n`;
+            message += `询问用户反馈: ${result.ask_user_feedback ? "是" : "否"}\n`;
+
+            return {
+                content: [
+                    { type: "text", text: message },
+                    { type: "text", text: result.report },
+                ],
+            };
+        } catch (error) {
+            const errorMessage =
+                error instanceof Error ? error.message : String(error);
+            return {
+                content: [{ type: "text", text: `审查失败: ${errorMessage}` }],
                 isError: true,
             };
         }
