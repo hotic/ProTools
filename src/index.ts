@@ -7,9 +7,18 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { MergeFilesInputSchema } from "./types/merge.js";
-import { CodeReviewInputSchema } from "./types/review.js";
+import {
+    CodeReviewInputSchema,
+    CodeReviewStartInputSchema,
+    CodeReviewStatusInputSchema,
+} from "./types/review.js";
 import { executeMergeFiles } from "./tools/merge-files.js";
-import { executeCodeReview } from "./tools/code-review.js";
+import {
+    executeCodeReview,
+    startCodeReviewTask,
+    getCodeReviewTaskStatus,
+} from "./tools/code-review.js";
+import type { CodeReviewTaskStatusOutput } from "./types/review.js";
 
 // 创建 MCP Server 实例
 const server = new McpServer({
@@ -101,6 +110,164 @@ server.tool(
                 error instanceof Error ? error.message : String(error);
             return {
                 content: [{ type: "text", text: `审查失败: ${errorMessage}` }],
+                isError: true,
+            };
+        }
+    }
+);
+
+function formatReviewTaskMessage(
+    title: string,
+    status: CodeReviewTaskStatusOutput
+): string {
+    const lines: string[] = [];
+
+    lines.push(title);
+    lines.push(`状态: ${status.status}`);
+    lines.push(`任务ID: ${status.task_id}`);
+    lines.push(`快照: ${status.snapshot_id}`);
+    lines.push(`模型: ${status.providers.join(", ")}`);
+
+    if (status.ready_providers.length > 0) {
+        lines.push(`已完成: ${status.ready_providers.join(", ")}`);
+    }
+    if (status.pending_providers.length > 0) {
+        lines.push(`待完成: ${status.pending_providers.join(", ")}`);
+    }
+    if (status.failed_providers && status.failed_providers.length > 0) {
+        lines.push(`失败: ${status.failed_providers.join(", ")}`);
+    }
+
+    if (status.summary) {
+        lines.push(`评分: ${status.summary.overall_score}/10`);
+        lines.push(`发现问题: ${status.summary.total_issues} 个`);
+        lines.push(`耗时: ${status.summary.duration_ms}ms`);
+        lines.push(`Provider: ${status.summary.provider}`);
+    }
+
+    lines.push(`询问用户反馈: ${status.ask_user_feedback ? "是" : "否"}`);
+
+    if (status.provider_errors && Object.keys(status.provider_errors).length > 0) {
+        const errorList = Object.entries(status.provider_errors)
+            .map(([provider, message]) => `${provider}: ${message}`)
+            .join(" | ");
+        lines.push(`错误: ${errorList}`);
+    }
+
+    if (status.output_path) {
+        lines.push(`报告文件: ${status.output_path}`);
+    }
+
+    if (
+        (status.status === "pending" || status.status === "partial") &&
+        status.poll_after_ms
+    ) {
+        lines.push(
+            `建议 ${status.poll_after_ms}ms 后使用 protools_code_review_status 查询`
+        );
+    }
+
+    const quickStatus = {
+        task_id: status.task_id,
+        status: status.status,
+        ready_providers: status.ready_providers,
+        pending_providers: status.pending_providers,
+        failed_providers: status.failed_providers,
+        snapshot_id: status.snapshot_id,
+    };
+
+    lines.push("");
+    lines.push("```json");
+    lines.push(JSON.stringify(quickStatus, null, 2));
+    lines.push("```");
+
+    return lines.join("\n");
+}
+
+// protools_code_review_start - 异步代码审查（启动）
+server.tool(
+    "protools_code_review_start",
+    `启动异步代码审查任务，返回任务 ID 并支持查询进度或获取部分结果。
+
+**重要：审查结果需要批判性分析**
+- 不是所有报告的问题都需要修复，需根据项目实际情况判断
+- 区分真正的问题 vs 过度工程化建议（如"建议添加更多配置"）
+- INFO 级别通常可忽略，MINOR 需权衡成本，MAJOR/CRITICAL 才是重点
+- 如果多个模型报告相同问题，可信度更高`,
+    CodeReviewStartInputSchema.shape,
+    async (params) => {
+        try {
+            const status = await startCodeReviewTask(params);
+            const message = formatReviewTaskMessage("代码审查任务已创建", status);
+
+            const content: Array<{ type: "text"; text: string }> = [
+                { type: "text", text: message },
+            ];
+
+            if (status.report) {
+                content.push({ type: "text", text: status.report });
+            } else if (status.provider_reports) {
+                for (const [provider, report] of Object.entries(
+                    status.provider_reports
+                )) {
+                    content.push({
+                        type: "text",
+                        text: `【${provider}】\n\n${report}`,
+                    });
+                }
+            }
+
+            return { content };
+        } catch (error) {
+            const errorMessage =
+                error instanceof Error ? error.message : String(error);
+            return {
+                content: [{ type: "text", text: `审查启动失败: ${errorMessage}` }],
+                isError: true,
+            };
+        }
+    }
+);
+
+// protools_code_review_status - 异步代码审查（状态查询）
+server.tool(
+    "protools_code_review_status",
+    `查询异步代码审查任务状态，可获取部分或最终结果。
+
+**重要：审查结果需要批判性分析**
+- 不是所有报告的问题都需要修复，需根据项目实际情况判断
+- 区分真正的问题 vs 过度工程化建议（如"建议添加更多配置"）
+- INFO 级别通常可忽略，MINOR 需权衡成本，MAJOR/CRITICAL 才是重点
+- 如果多个模型报告相同问题，可信度更高`,
+    CodeReviewStatusInputSchema.shape,
+    async (params) => {
+        try {
+            const status = getCodeReviewTaskStatus(params);
+            const message = formatReviewTaskMessage("代码审查任务状态", status);
+
+            const content: Array<{ type: "text"; text: string }> = [
+                { type: "text", text: message },
+            ];
+
+            if (status.report) {
+                content.push({ type: "text", text: status.report });
+            } else if (status.provider_reports) {
+                for (const [provider, report] of Object.entries(
+                    status.provider_reports
+                )) {
+                    content.push({
+                        type: "text",
+                        text: `【${provider}】\n\n${report}`,
+                    });
+                }
+            }
+
+            return { content };
+        } catch (error) {
+            const errorMessage =
+                error instanceof Error ? error.message : String(error);
+            return {
+                content: [{ type: "text", text: `状态查询失败: ${errorMessage}` }],
                 isError: true,
             };
         }

@@ -26,6 +26,18 @@
 - `compact`：移除注释、import/package、多余空行
 - `skeleton`：仅保留类/方法签名
 
+### `protools_code_review`
+
+使用 AI 对代码进行审查，支持单模型或并发模式输出报告。
+
+### `protools_code_review_start`
+
+启动异步代码审查任务，返回任务 ID，可先获取快模型结果再轮询慢模型结果。
+
+### `protools_code_review_status`
+
+查询异步代码审查任务状态，获取部分或最终结果。
+
 ## MCP 配置
 
 ```json

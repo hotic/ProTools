@@ -15,6 +15,9 @@ import type {
 const DEFAULT_MODEL = "gemini-3-flash-preview";
 const DEFAULT_MAX_TOKENS = 65536; // Gemini 3 Flash 最大输出
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+const DEFAULT_TIMEOUT_MS = 3 * 60 * 1000; // 3 分钟（Gemini 相对较快）
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 1000;
 
 // thinking level 级别
 type ThinkingLevel = "NONE" | "LOW" | "MEDIUM" | "HIGH";
@@ -59,6 +62,8 @@ export class GeminiProvider extends BaseLLMProvider {
             max_output_tokens: maxTokens,
             // 开启推理模式时，官方建议 temperature 为 1.0
             temperature: useThinking ? 1.0 : (config?.temperature ?? 0.7),
+            // 强制 JSON 格式输出
+            response_mime_type: "application/json",
         };
 
         // Gemini 3 推理配置（在 generationConfig 内部）
@@ -76,42 +81,92 @@ export class GeminiProvider extends BaseLLMProvider {
 
         const endpoint = `${API_BASE}/${model}:generateContent`;
 
-        const response = await fetch(endpoint, {
-            method: "POST",
-            headers: {
-                "x-goog-api-key": this.apiKey!,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(requestBody),
-        });
+        // 带超时和重试的请求
+        let lastError: Error | null = null;
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(
-                `Gemini API 错误: ${response.status} - ${JSON.stringify(errorData)}`
-            );
+            try {
+                const response = await fetch(endpoint, {
+                    method: "POST",
+                    headers: {
+                        "x-goog-api-key": this.apiKey!,
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(requestBody),
+                    signal: controller.signal,
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    const statusCode = response.status;
+
+                    // 可重试的状态码：429（限流）、5xx（服务器错误）
+                    if ((statusCode === 429 || statusCode >= 500) && attempt < MAX_RETRIES) {
+                        lastError = new Error(
+                            `Gemini API 错误: ${statusCode} - ${JSON.stringify(errorData)}`
+                        );
+                        await this.delay(RETRY_DELAY_MS * Math.pow(2, attempt));
+                        continue;
+                    }
+
+                    throw new Error(
+                        `Gemini API 错误: ${statusCode} - ${JSON.stringify(errorData)}`
+                    );
+                }
+
+                const data = (await response.json()) as Record<string, unknown>;
+
+                // 解析 Gemini 返回格式
+                const outputText = this.extractOutputText(data);
+
+                // 获取 usage 信息
+                const usageMetadata = data.usageMetadata as Record<string, number> | undefined;
+
+                return {
+                    content: outputText,
+                    model,
+                    usage: usageMetadata
+                        ? {
+                              promptTokens: usageMetadata.promptTokenCount ?? 0,
+                              completionTokens:
+                                  usageMetadata.candidatesTokenCount ?? 0,
+                              totalTokens: usageMetadata.totalTokenCount ?? 0,
+                          }
+                        : undefined,
+                };
+            } catch (error) {
+                clearTimeout(timeoutId);
+
+                // 处理超时和网络错误
+                if (error instanceof Error) {
+                    if (error.name === "AbortError") {
+                        lastError = new Error(`Gemini API 请求超时 (${DEFAULT_TIMEOUT_MS / 1000}s)`);
+                    } else if (error.message.includes("fetch")) {
+                        lastError = new Error(`Gemini API 网络错误: ${error.message}`);
+                    } else {
+                        lastError = error;
+                    }
+                } else {
+                    lastError = new Error(String(error));
+                }
+
+                // 网络错误可重试
+                if (attempt < MAX_RETRIES) {
+                    await this.delay(RETRY_DELAY_MS * Math.pow(2, attempt));
+                    continue;
+                }
+            }
         }
 
-        const data = (await response.json()) as Record<string, unknown>;
+        throw lastError ?? new Error("Gemini API 请求失败");
+    }
 
-        // 解析 Gemini 返回格式
-        const outputText = this.extractOutputText(data);
-
-        // 获取 usage 信息
-        const usageMetadata = data.usageMetadata as Record<string, number> | undefined;
-
-        return {
-            content: outputText,
-            model,
-            usage: usageMetadata
-                ? {
-                      promptTokens: usageMetadata.promptTokenCount ?? 0,
-                      completionTokens:
-                          usageMetadata.candidatesTokenCount ?? 0,
-                      totalTokens: usageMetadata.totalTokenCount ?? 0,
-                  }
-                : undefined,
-        };
+    private delay(ms: number): Promise<void> {
+        return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
     /** 将 ChatMessage 转换为 Gemini 格式 */

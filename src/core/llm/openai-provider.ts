@@ -15,6 +15,9 @@ import type {
 const DEFAULT_MODEL = "gpt-5.2";
 const DEFAULT_MAX_TOKENS = 16384;
 const API_ENDPOINT = "https://api.openai.com/v1/responses";
+const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000; // 5 分钟（高推理模式需要较长时间）
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 1000;
 
 // reasoning effort 级别
 type ReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh";
@@ -53,6 +56,10 @@ export class OpenAIProvider extends BaseLLMProvider {
             model,
             input: messages,
             max_output_tokens: maxTokens,
+            // 强制 JSON 输出格式，避免非 JSON 前缀
+            text: {
+                format: { type: "json_object" },
+            },
         };
 
         // 根据环境变量配置 reasoning effort
@@ -63,43 +70,93 @@ export class OpenAIProvider extends BaseLLMProvider {
 
         // 注意：GPT-5.2 Responses API 使用 reasoning 时不支持 temperature
 
-        const response = await fetch(API_ENDPOINT, {
-            method: "POST",
-            headers: {
-                Authorization: `Bearer ${this.apiKey}`,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(requestBody),
-        });
+        // 带超时和重试的请求
+        let lastError: Error | null = null;
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(
-                `OpenAI API 错误: ${response.status} - ${JSON.stringify(errorData)}`
-            );
+            try {
+                const response = await fetch(API_ENDPOINT, {
+                    method: "POST",
+                    headers: {
+                        Authorization: `Bearer ${this.apiKey}`,
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(requestBody),
+                    signal: controller.signal,
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    const statusCode = response.status;
+
+                    // 可重试的状态码：429（限流）、5xx（服务器错误）
+                    if ((statusCode === 429 || statusCode >= 500) && attempt < MAX_RETRIES) {
+                        lastError = new Error(
+                            `OpenAI API 错误: ${statusCode} - ${JSON.stringify(errorData)}`
+                        );
+                        await this.delay(RETRY_DELAY_MS * Math.pow(2, attempt));
+                        continue;
+                    }
+
+                    throw new Error(
+                        `OpenAI API 错误: ${statusCode} - ${JSON.stringify(errorData)}`
+                    );
+                }
+
+                const data = (await response.json()) as Record<string, unknown>;
+
+                // 解析 Responses API 返回格式
+                const outputText = this.extractOutputText(data);
+
+                // 获取 usage 信息
+                const usage = data.usage as Record<string, number> | undefined;
+
+                return {
+                    content: outputText,
+                    model: (data.model as string) ?? model,
+                    usage: usage
+                        ? {
+                              promptTokens: usage.input_tokens ?? 0,
+                              completionTokens: usage.output_tokens ?? 0,
+                              totalTokens:
+                                  (usage.input_tokens ?? 0) +
+                                  (usage.output_tokens ?? 0),
+                          }
+                        : undefined,
+                };
+            } catch (error) {
+                clearTimeout(timeoutId);
+
+                // 处理超时和网络错误
+                if (error instanceof Error) {
+                    if (error.name === "AbortError") {
+                        lastError = new Error(`OpenAI API 请求超时 (${DEFAULT_TIMEOUT_MS / 1000}s)`);
+                    } else if (error.message.includes("fetch")) {
+                        lastError = new Error(`OpenAI API 网络错误: ${error.message}`);
+                    } else {
+                        lastError = error;
+                    }
+                } else {
+                    lastError = new Error(String(error));
+                }
+
+                // 网络错误可重试
+                if (attempt < MAX_RETRIES) {
+                    await this.delay(RETRY_DELAY_MS * Math.pow(2, attempt));
+                    continue;
+                }
+            }
         }
 
-        const data = (await response.json()) as Record<string, unknown>;
+        throw lastError ?? new Error("OpenAI API 请求失败");
+    }
 
-        // 解析 Responses API 返回格式
-        const outputText = this.extractOutputText(data);
-
-        // 获取 usage 信息
-        const usage = data.usage as Record<string, number> | undefined;
-
-        return {
-            content: outputText,
-            model: (data.model as string) ?? model,
-            usage: usage
-                ? {
-                      promptTokens: usage.input_tokens ?? 0,
-                      completionTokens: usage.output_tokens ?? 0,
-                      totalTokens:
-                          (usage.input_tokens ?? 0) +
-                          (usage.output_tokens ?? 0),
-                  }
-                : undefined,
-        };
+    private delay(ms: number): Promise<void> {
+        return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
     /** 从 Responses API 返回中提取文本（跳过 reasoning 部分） */

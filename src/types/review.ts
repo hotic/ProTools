@@ -4,12 +4,22 @@
 
 import { z } from "zod";
 
-// 审查关注领域
-export const ReviewFocusSchema = z.enum([
+// 问题类别（用于 Issue，不包含 "all"）
+export const IssueCategorySchema = z.enum([
     "security", // 安全漏洞
     "performance", // 性能问题
     "quality", // 代码质量
     "maintainability", // 可维护性
+]);
+
+export type IssueCategory = z.infer<typeof IssueCategorySchema>;
+
+// 审查关注领域（用于工具输入，包含 "all"）
+export const ReviewFocusSchema = z.enum([
+    "security",
+    "performance",
+    "quality",
+    "maintainability",
     "all", // 全面审查
 ]);
 
@@ -35,8 +45,8 @@ export const ReviewIssueSchema = z.object({
     line_end: z.number().optional(),
     /** 严重程度 */
     severity: SeveritySchema,
-    /** 问题类别 */
-    category: ReviewFocusSchema,
+    /** 问题类别（不包含 "all"） */
+    category: IssueCategorySchema,
     /** 问题标题 */
     title: z.string(),
     /** 详细描述 */
@@ -160,6 +170,34 @@ export const CodeReviewInputSchema = z.object({
 
 export type CodeReviewInput = z.infer<typeof CodeReviewInputSchema>;
 
+// 异步审查任务输入（启动）
+export const CodeReviewStartInputSchema = CodeReviewInputSchema.extend({
+    /** 并发审查使用的 provider 列表 */
+    providers: z
+        .array(ProviderSchema)
+        .optional()
+        .describe("并发审查使用的 provider 列表，默认使用 LLM_PROVIDER"),
+
+    /** 等待首个结果的超时时间（毫秒） */
+    wait_first_result_ms: z
+        .number()
+        .int()
+        .min(0)
+        .max(60000)
+        .optional()
+        .describe("等待首个模型结果的超时时间（毫秒），0 表示立即返回"),
+});
+
+export type CodeReviewStartInput = z.infer<typeof CodeReviewStartInputSchema>;
+
+// 异步审查任务输入（查询状态）
+export const CodeReviewStatusInputSchema = z.object({
+    /** 任务 ID */
+    task_id: z.string().describe("由 protools_code_review_start 返回的任务 ID"),
+});
+
+export type CodeReviewStatusInput = z.infer<typeof CodeReviewStatusInputSchema>;
+
 // 工具输出类型
 export interface CodeReviewOutput {
     /** 结构化审查结果 */
@@ -176,4 +214,34 @@ export interface CodeReviewOutput {
     is_concurrent: boolean;
     /** 各 provider 的独立结果（并发模式时存在） */
     provider_results?: Record<string, ReviewResult>;
+}
+
+export type ReviewTaskStatus = "pending" | "partial" | "completed" | "failed";
+
+export interface CodeReviewTaskSummary {
+    overall_score: number;
+    files_reviewed: number;
+    total_issues: number;
+    duration_ms: number;
+    provider: string;
+}
+
+export interface CodeReviewTaskStatusOutput {
+    task_id: string;
+    status: ReviewTaskStatus;
+    snapshot_id: string;
+    providers: string[];
+    ready_providers: string[];
+    pending_providers: string[];
+    failed_providers?: string[];
+    provider_errors?: Record<string, string>;
+    summary?: CodeReviewTaskSummary;
+    report?: string;
+    provider_reports?: Record<string, string>;
+    output_path?: string;
+    ask_user_feedback: boolean;
+    is_concurrent: boolean;
+    created_at: number;
+    updated_at: number;
+    poll_after_ms?: number;
 }
