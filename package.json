@@ -1,7 +1,7 @@
 {
     "name": "protools-mcp",
     "version": "1.0.0",
-    "description": "ProTools MCP Server - 可扩展的工具盒，封装日常脚本",
+    "description": "ProTools MCP - 可扩展的工具盒，封装一些实用工具。",
     "type": "module",
     "main": "dist/index.js",
     "scripts": {
@@ -12,9 +12,12 @@
     "keywords": [
         "mcp",
         "tools",
-        "merge-files"
+        "merge-files",
+        "code-review",
+        "ai",
+        "llm"
     ],
-    "author": "",
+    "author": "hotic",
     "license": "MIT",
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.0.0",
