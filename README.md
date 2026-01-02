@@ -7,6 +7,7 @@
 - **代码合并**：将多个源文件合并为单一上下文，支持压缩模式
 - **AI 代码审查**：支持 OpenAI GPT-5.2 和 Google Gemini 3 Flash 双模型并发审查
 - **异步任务**：长时间任务支持异步执行和轮询查询
+- **智能默认**：未指定审查目标时自动检测 Git 变更
 
 ## 工具列表
 
@@ -36,13 +37,14 @@
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
+| `cwd` | `string` | - | 工作目录（多仓库工作区时指定项目路径） |
 | `inputs` | `string[]` | - | 文件/目录/glob 路径（与 git_mode 二选一） |
-| `git_mode` | `staged \| unstaged \| all` | - | Git diff 模式 |
+| `git_mode` | `staged \| unstaged \| all` | - | Git diff 模式（未指定 inputs 时自动启用） |
 | `include_full_files` | `boolean` | `true` | Git 模式下是否包含完整文件内容 |
 | `include_project_context` | `boolean` | `true` | 是否包含项目上下文 |
 | `focus` | `security \| performance \| quality \| maintainability \| all` | `all` | 审查关注领域 |
 | `provider` | `openai \| gemini` | - | 指定单个 Provider |
-| `mode` | `full \| compact` | `compact` | 代码压缩模式 |
+| `mode` | `full \| compact \| skeleton` | `compact` | 代码压缩模式 |
 | `context` | `string` | - | 附加审查说明 |
 | `output` | `inline \| file` | `inline` | 输出方式 |
 
@@ -55,6 +57,8 @@
 | 继承 `protools_code_review` 全部参数 |||
 | `providers` | `string[]` | - | 并发使用的 Provider 列表 |
 | `wait_first_result_ms` | `number` | `0` | 等待首个结果的超时时间（毫秒） |
+
+> **提示**：未指定 `inputs` 和 `git_mode` 时，会自动检测 Git 变更并使用 `all` 模式。
 
 ### `protools_code_review_status`
 
@@ -70,7 +74,7 @@
 # OpenAI 配置
 OPENAI_API_KEY=sk-xxx           # OpenAI API Key
 OPENAI_BASE_URL=                # 可选，自定义 API 地址
-OPENAI_REASONING_EFFORT=xhigh   # 推理级别：none | low | medium | high | xhigh
+OPENAI_REASONING_EFFORT=medium  # 推理级别：none | low | medium | high | xhigh
 
 # Gemini 配置
 GEMINI_API_KEY=xxx              # Google AI API Key
@@ -94,6 +98,7 @@ ASK_USER_FEEDBACK=false         # 是否询问用户反馈
       "args": ["/path/to/ProTools/dist/index.js"],
       "env": {
         "OPENAI_API_KEY": "sk-xxx",
+        "OPENAI_REASONING_EFFORT": "medium",
         "GEMINI_API_KEY": "xxx",
         "LLM_PROVIDER": "openai,gemini",
         "CONCURRENT_REVIEW": "true",
@@ -114,8 +119,10 @@ ASK_USER_FEEDBACK=false         # 是否询问用户反馈
       "args": ["tsx", "/path/to/ProTools/src/index.ts"],
       "env": {
         "OPENAI_API_KEY": "sk-xxx",
+        "OPENAI_REASONING_EFFORT": "medium",
         "GEMINI_API_KEY": "xxx",
-        "LLM_PROVIDER": "openai,gemini"
+        "LLM_PROVIDER": "openai,gemini",
+        "CONCURRENT_REVIEW": "true"
       }
     }
   }
