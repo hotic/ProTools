@@ -91,8 +91,8 @@ export function cleanupReviewTasks(): void {
     }
 }
 
-// 启动定时清理器
-setInterval(cleanupReviewTasks, REVIEW_TASK_CLEANUP_INTERVAL_MS);
+// 启动定时清理器（unref 确保不阻止进程退出）
+setInterval(cleanupReviewTasks, REVIEW_TASK_CLEANUP_INTERVAL_MS).unref();
 
 /** 去重 Provider 列表 */
 export function normalizeProviders(providers: LLMProviderType[]): LLMProviderType[] {
@@ -191,18 +191,21 @@ export function buildTaskStatusOutput(task: ReviewTask): CodeReviewTaskStatusOut
                 : undefined,
     };
 
-    // 只在完成状态时返回完整报告
-    if (task.status === "completed" || task.status === "failed") {
-        if (task.combinedResult && task.report) {
+    // 只要有已完成的 provider 就返回其报告（包括 partial 状态）
+    if (readyProviders.length > 0) {
+        // completed/failed 且有合并结果时，返回合并报告
+        if ((task.status === "completed" || task.status === "failed") && task.combinedResult && task.report) {
             output.report = task.report;
             return output;
         }
 
+        // 单个 provider 完成时直接返回其报告
         if (readyProviders.length === 1) {
             output.report = generateMarkdownReport(task.results[readyProviders[0]]);
             return output;
         }
 
+        // 多个 provider 完成时返回各自的报告
         if (readyProviders.length > 1) {
             const providerReports: Record<string, string> = {};
             for (const provider of readyProviders) {

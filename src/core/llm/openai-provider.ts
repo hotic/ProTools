@@ -13,7 +13,7 @@ import type {
 
 // 默认配置
 const DEFAULT_MODEL = "gpt-5.2";
-const DEFAULT_MAX_TOKENS = 16384;
+const DEFAULT_MAX_TOKENS = 65536; // GPT-5.2 支持更大的输出上限
 const API_ENDPOINT = "https://api.openai.com/v1/responses";
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000; // 5 分钟（高推理模式需要较长时间）
 const MAX_RETRIES = 2;
@@ -28,7 +28,7 @@ function getReasoningEffort(): ReasoningEffort {
     if (env === "none" || env === "low" || env === "medium" || env === "high" || env === "xhigh") {
         return env;
     }
-    return "xhigh"; // 默认最高
+    return "medium"; // 默认 medium，平衡质量和速度
 }
 
 export class OpenAIProvider extends BaseLLMProvider {

@@ -109,6 +109,7 @@ async function prepareReviewRequest(
     const startTime = Date.now();
 
     const {
+        cwd,
         inputs,
         git_mode,
         // 修复：不设默认值，由 Zod Schema 的 default(true) 来处理
@@ -123,15 +124,25 @@ async function prepareReviewRequest(
         output_dir,
     } = input;
 
-    // 验证输入：inputs 和 git_mode 至少要有一个
+    // 智能默认：当未指定 inputs 和 git_mode 时，自动使用 git 变更模式
+    let effectiveGitMode = git_mode;
     if (!inputs?.length && !git_mode) {
-        throw new Error("必须指定 inputs（文件路径）或 git_mode（git diff 模式）");
+        // 检查是否有未提交的变更
+        const { hasUncommittedChanges } = await import("../core/git.js");
+        if (hasUncommittedChanges(cwd)) {
+            effectiveGitMode = "all";
+        } else {
+            throw new Error(
+                "未指定审查目标。请指定 inputs（文件路径）或 git_mode（git diff 模式），" +
+                "或者确保有未提交的 git 变更"
+            );
+        }
     }
 
     // 收集项目上下文（如果启用）
     let projectContextStr = "";
     if (include_project_context) {
-        const projectCtx = collectProjectContext();
+        const projectCtx = collectProjectContext(cwd);
         projectContextStr = formatProjectContext(projectCtx);
     }
 
@@ -139,16 +150,18 @@ async function prepareReviewRequest(
     let filesCount: number;
 
     // 根据模式获取代码内容
-    if (git_mode) {
+    if (effectiveGitMode) {
         // Git diff 模式（增强版，可选包含完整文件）
         // include_full_files 默认由 Schema 设为 true
-        const gitResult = getEnhancedGitDiff(git_mode as GitMode, {
+        const gitResult = getEnhancedGitDiff(effectiveGitMode as GitMode, {
+            cwd,
             includeFullFiles: include_full_files ?? true,
+            mergeMode: mode as MergeMode,
         });
 
         if (!gitResult.content || gitResult.files.length === 0) {
             throw new Error(
-                `没有${git_mode === "staged" ? "已暂存" : git_mode === "unstaged" ? "未暂存" : "未提交"}的更改`
+                `没有${effectiveGitMode === "staged" ? "已暂存" : effectiveGitMode === "unstaged" ? "未暂存" : "未提交"}的更改`
             );
         }
 
@@ -158,7 +171,7 @@ async function prepareReviewRequest(
         const parts: string[] = [];
 
         // 添加 Git diff 信息
-        parts.push(`[Git Diff 模式: ${git_mode}]`);
+        parts.push(`[Git Diff 模式: ${effectiveGitMode}]`);
         parts.push(`变更文件: ${gitResult.files.join(", ")}`);
         parts.push(`统计: +${gitResult.stats.additions} -${gitResult.stats.deletions}`);
         parts.push("");
@@ -232,7 +245,7 @@ async function runProviderReview(
 ): Promise<ReviewResult> {
     const provider = getLLMProvider(providerType);
     const llmResponse = await provider.chat(messages, {
-        maxTokens: 16384,
+        maxTokens: 65536, // GPT-5.2 支持更大的输出上限
         temperature: 0.3,
         thinking: true,
     });
@@ -494,6 +507,11 @@ export async function startCodeReviewTask(
                 task.errors[providerType] =
                     error instanceof Error ? error.message : String(error);
                 updateTaskStatus(task);
+                // 也需要检查是否需要 finalize（当最后一个 provider 失败时）
+                const finishedCount = Object.keys(task.results).length + Object.keys(task.errors).length;
+                if (finishedCount === task.providers.length && Object.keys(task.results).length > 0) {
+                    finalizeReviewTask(task);
+                }
             })
     );
 

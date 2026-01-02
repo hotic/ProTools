@@ -45,6 +45,7 @@ export function buildUserPrompt(params: PromptParams): string {
 
 /**
  * 解析 LLM 返回的 JSON 结果
+ * 增强版：支持从混乱输出中提取有效 JSON
  */
 export function parseReviewResponse(response: string): Record<string, unknown> {
     // 尝试提取 JSON 块（如果被 markdown 包裹）
@@ -62,11 +63,80 @@ export function parseReviewResponse(response: string): Record<string, unknown> {
         jsonStr = jsonStr.slice(startIndex, endIndex + 1);
     }
 
+    // 第一次尝试直接解析
     try {
         return JSON.parse(jsonStr);
-    } catch (error) {
-        throw new Error(
-            `JSON 解析失败: ${error instanceof Error ? error.message : error}\n原始响应: ${response.slice(0, 500)}...`
-        );
+    } catch {
+        // 解析失败，尝试修复常见问题
     }
+
+    // 尝试修复：移除可能的控制字符和无效 Unicode
+    const cleanedJson = jsonStr
+        .replace(/[\x00-\x1F\x7F]/g, " ") // 移除控制字符
+        .replace(/\r\n/g, "\\n")          // 统一换行符
+        .replace(/\r/g, "\\n");
+
+    try {
+        return JSON.parse(cleanedJson);
+    } catch {
+        // 继续尝试其他修复
+    }
+
+    // 尝试修复：使用平衡括号提取
+    try {
+        const extracted = extractBalancedJson(jsonStr);
+        if (extracted) {
+            return JSON.parse(extracted);
+        }
+    } catch {
+        // 继续
+    }
+
+    // 最终失败
+    throw new Error(
+        `JSON 解析失败: 无法从响应中提取有效 JSON\n原始响应: ${response.slice(0, 500)}...`
+    );
+}
+
+/**
+ * 使用括号平衡算法提取 JSON
+ */
+function extractBalancedJson(str: string): string | null {
+    const start = str.indexOf("{");
+    if (start === -1) return null;
+
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+
+    for (let i = start; i < str.length; i++) {
+        const char = str[i];
+
+        if (escape) {
+            escape = false;
+            continue;
+        }
+
+        if (char === "\\") {
+            escape = true;
+            continue;
+        }
+
+        if (char === '"' && !escape) {
+            inString = !inString;
+            continue;
+        }
+
+        if (!inString) {
+            if (char === "{") depth++;
+            else if (char === "}") {
+                depth--;
+                if (depth === 0) {
+                    return str.slice(start, i + 1);
+                }
+            }
+        }
+    }
+
+    return null;
 }

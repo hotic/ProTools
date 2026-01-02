@@ -3,9 +3,11 @@
  * 支持获取 git diff 内容用于代码审查
  */
 
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { processFile } from "./merge.js";
+import type { MergeMode } from "../types/merge.js";
 
 /** Git diff 模式 */
 export type GitMode = "staged" | "unstaged" | "all";
@@ -171,17 +173,17 @@ export function getGitDiffWithContext(mode: GitMode, cwd?: string): GitDiffResul
         parts.push(`File: ${file}`);
         parts.push("=".repeat(60));
 
-        // 获取该文件的 diff
+        // 获取该文件的 diff（使用 execFileSync 避免命令注入）
         try {
             let fileDiff: string;
             if (mode === "staged") {
-                fileDiff = execSync(`git diff --cached -- "${file}"`, execOptions).toString();
+                fileDiff = execFileSync("git", ["diff", "--cached", "--", file], execOptions).toString();
             } else if (mode === "unstaged") {
-                fileDiff = execSync(`git diff -- "${file}"`, execOptions).toString();
+                fileDiff = execFileSync("git", ["diff", "--", file], execOptions).toString();
             } else {
                 // all: 合并 staged 和 unstaged
-                const staged = execSync(`git diff --cached -- "${file}"`, execOptions).toString();
-                const unstaged = execSync(`git diff -- "${file}"`, execOptions).toString();
+                const staged = execFileSync("git", ["diff", "--cached", "--", file], execOptions).toString();
+                const unstaged = execFileSync("git", ["diff", "--", file], execOptions).toString();
                 fileDiff = staged + unstaged;
             }
             parts.push(fileDiff || "(无差异)");
@@ -208,26 +210,9 @@ function parseGitStats(mode: GitMode, cwd?: string): GitDiffResult["stats"] {
         encoding: "utf-8" as const,
     };
 
-    try {
-        let statOutput: string;
-
-        switch (mode) {
-            case "staged":
-                statOutput = execSync("git diff --cached --stat", execOptions).toString();
-                break;
-            case "unstaged":
-                statOutput = execSync("git diff --stat", execOptions).toString();
-                break;
-            case "all":
-            default:
-                const staged = execSync("git diff --cached --stat", execOptions).toString();
-                const unstaged = execSync("git diff --stat", execOptions).toString();
-                statOutput = staged + unstaged;
-                break;
-        }
-
-        // 解析最后一行的统计信息
-        const lines = statOutput.trim().split("\n");
+    /** 从 --stat 输出解析统计数据 */
+    function parseStatOutput(output: string): { files: number; additions: number; deletions: number } {
+        const lines = output.trim().split("\n");
         const lastLine = lines[lines.length - 1] || "";
 
         const filesMatch = lastLine.match(/(\d+) files? changed/);
@@ -235,10 +220,54 @@ function parseGitStats(mode: GitMode, cwd?: string): GitDiffResult["stats"] {
         const deletionsMatch = lastLine.match(/(\d+) deletions?/);
 
         return {
-            filesChanged: filesMatch ? parseInt(filesMatch[1], 10) : 0,
+            files: filesMatch ? parseInt(filesMatch[1], 10) : 0,
             additions: insertionsMatch ? parseInt(insertionsMatch[1], 10) : 0,
             deletions: deletionsMatch ? parseInt(deletionsMatch[1], 10) : 0,
         };
+    }
+
+    try {
+        switch (mode) {
+            case "staged": {
+                const output = execSync("git diff --cached --stat", execOptions).toString();
+                const stats = parseStatOutput(output);
+                return {
+                    filesChanged: stats.files,
+                    additions: stats.additions,
+                    deletions: stats.deletions,
+                };
+            }
+            case "unstaged": {
+                const output = execSync("git diff --stat", execOptions).toString();
+                const stats = parseStatOutput(output);
+                return {
+                    filesChanged: stats.files,
+                    additions: stats.additions,
+                    deletions: stats.deletions,
+                };
+            }
+            case "all":
+            default: {
+                // 分别解析 staged 和 unstaged，然后相加
+                const stagedOutput = execSync("git diff --cached --stat", execOptions).toString();
+                const unstagedOutput = execSync("git diff --stat", execOptions).toString();
+                const stagedStats = parseStatOutput(stagedOutput);
+                const unstagedStats = parseStatOutput(unstagedOutput);
+
+                // 文件数需要去重（同一文件可能同时有 staged 和 unstaged 变更）
+                const stagedFiles = execSync("git diff --cached --name-only", execOptions)
+                    .toString().trim().split("\n").filter(Boolean);
+                const unstagedFiles = execSync("git diff --name-only", execOptions)
+                    .toString().trim().split("\n").filter(Boolean);
+                const uniqueFiles = new Set([...stagedFiles, ...unstagedFiles]);
+
+                return {
+                    filesChanged: uniqueFiles.size,
+                    additions: stagedStats.additions + unstagedStats.additions,
+                    deletions: stagedStats.deletions + unstagedStats.deletions,
+                };
+            }
+        }
     } catch {
         return { filesChanged: 0, additions: 0, deletions: 0 };
     }
@@ -279,22 +308,43 @@ export function hasUncommittedChanges(cwd?: string): boolean {
  * 获取变更文件的完整内容（当前工作区版本）
  * @param files 文件列表
  * @param cwd 工作目录
+ * @param mode 压缩模式（默认 compact）
  */
-export function getChangedFilesContent(files: string[], cwd?: string): string {
+export function getChangedFilesContent(
+    files: string[],
+    cwd?: string,
+    mode: MergeMode = "compact"
+): string {
     const parts: string[] = [];
     const basePath = cwd || process.cwd();
+    const resolvedBase = path.resolve(basePath);
 
     for (const file of files) {
         const fullPath = path.join(basePath, file);
+        const resolvedPath = path.resolve(fullPath);
+
+        // 安全检查：确保路径不越界
+        if (!resolvedPath.startsWith(resolvedBase + path.sep) && resolvedPath !== resolvedBase) {
+            parts.push(`\n${"─".repeat(60)}`);
+            parts.push(`📄 ${file}`);
+            parts.push("─".repeat(60));
+            parts.push("(路径越界，跳过)");
+            continue;
+        }
 
         parts.push(`\n${"─".repeat(60)}`);
-        parts.push(`📄 ${file} (完整内容)`);
+        parts.push(`📄 ${file}`);
         parts.push("─".repeat(60));
 
         try {
             if (fs.existsSync(fullPath)) {
-                const content = fs.readFileSync(fullPath, "utf-8");
-                parts.push(content);
+                // 使用 merge 模块处理文件（支持 compact/skeleton 压缩）
+                const processed = processFile(fullPath, mode, basePath);
+                if (processed) {
+                    parts.push(processed.content);
+                } else {
+                    parts.push("(文件为空或无法处理)");
+                }
             } else {
                 parts.push("(文件已删除)");
             }
@@ -322,9 +372,10 @@ export function getEnhancedGitDiff(
     options: {
         cwd?: string;
         includeFullFiles?: boolean;
+        mergeMode?: MergeMode;
     } = {}
 ): EnhancedGitDiffResult {
-    const { cwd, includeFullFiles = false } = options;
+    const { cwd, includeFullFiles = false, mergeMode = "compact" } = options;
 
     // 获取基本 diff
     const basicResult = getGitDiffWithContext(mode, cwd);
@@ -333,7 +384,7 @@ export function getEnhancedGitDiff(
     if (includeFullFiles && basicResult.files.length > 0) {
         return {
             ...basicResult,
-            fullFilesContent: getChangedFilesContent(basicResult.files, cwd),
+            fullFilesContent: getChangedFilesContent(basicResult.files, cwd, mergeMode),
         };
     }
 

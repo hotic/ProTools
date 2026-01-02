@@ -103,6 +103,12 @@ export type Provider = z.infer<typeof ProviderSchema>;
 
 // 工具输入参数 Schema
 export const CodeReviewInputSchema = z.object({
+    /** 工作目录（多仓库工作区时指定项目路径） */
+    cwd: z
+        .string()
+        .optional()
+        .describe("工作目录，多仓库工作区时指定要审查的项目路径（如 /home/user/Work/xxxx）"),
+
     /** 要审查的文件/目录/glob 路径列表（与 git_mode 二选一） */
     inputs: z
         .array(z.string())
@@ -146,9 +152,9 @@ export const CodeReviewInputSchema = z.object({
 
     /** 压缩模式 */
     mode: z
-        .enum(["full", "compact"])
+        .enum(["full", "compact", "skeleton"])
         .default("compact")
-        .describe("代码压缩模式：full=完整代码 | compact=移除注释和import"),
+        .describe("代码压缩模式：full=完整代码 | compact=移除注释和import | skeleton=仅保留类/方法签名（适合全仓库审查）"),
 
     /** LLM Provider（单个） */
     provider: ProviderSchema.optional().describe(

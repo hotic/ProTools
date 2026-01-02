@@ -193,7 +193,12 @@ server.tool(
 - 不是所有报告的问题都需要修复，需根据项目实际情况判断
 - 区分真正的问题 vs 过度工程化建议（如"建议添加更多配置"）
 - INFO 级别通常可忽略，MINOR 需权衡成本，MAJOR/CRITICAL 才是重点
-- 如果多个模型报告相同问题，可信度更高`,
+- 如果多个模型报告相同问题，可信度更高
+
+**高效等待（避免轮询）**
+- 设置较大的 wait_first_result_ms（如 60000）一次性等待首个结果
+- 或在查询 status 前用 Bash sleep 间隔等待（如 sleep 15）
+- 不要疯狂轮询 status，每次调用都消耗 token`,
     CodeReviewStartInputSchema.shape,
     async (params) => {
         try {
@@ -234,11 +239,7 @@ server.tool(
     "protools_code_review_status",
     `查询异步代码审查任务状态，可获取部分或最终结果。
 
-**重要：审查结果需要批判性分析**
-- 不是所有报告的问题都需要修复，需根据项目实际情况判断
-- 区分真正的问题 vs 过度工程化建议（如"建议添加更多配置"）
-- INFO 级别通常可忽略，MINOR 需权衡成本，MAJOR/CRITICAL 才是重点
-- 如果多个模型报告相同问题，可信度更高`,
+注意：审查结果需批判性分析，详见 protools_code_review_start 的说明。`,
     CodeReviewStatusInputSchema.shape,
     async (params) => {
         try {
