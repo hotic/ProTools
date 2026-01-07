@@ -12,12 +12,14 @@ import {
     CodeReviewStartInputSchema,
     CodeReviewStatusInputSchema,
 } from "./types/review.js";
+import { DocumentSuggestInputSchema } from "./types/document.js";
 import { executeMergeFiles } from "./tools/merge-files.js";
 import {
     executeCodeReview,
     startCodeReviewTask,
     getCodeReviewTaskStatus,
 } from "./tools/code-review.js";
+import { executeDocumentSuggest } from "./tools/document-suggest.js";
 import type { CodeReviewTaskStatusOutput } from "./types/review.js";
 
 // 创建 MCP Server 实例
@@ -269,6 +271,53 @@ server.tool(
                 error instanceof Error ? error.message : String(error);
             return {
                 content: [{ type: "text", text: `状态查询失败: ${errorMessage}` }],
+                isError: true,
+            };
+        }
+    }
+);
+
+// protools_document_suggest - 文档生成
+server.tool(
+    "protools_document_suggest",
+    `从代码/配置变更中提取隐含规范，生成结构化文档。
+
+**文档类型**
+- spec: 技术规范（配置格式、字段定义、约束规则）
+- decision: 设计决策（为什么这么做、权衡考量）
+- changelog: 变更日志（按类别分组的变更记录）
+- auto: 自动推断最合适的类型
+
+**输出格式**
+- markdown: 标准 Markdown
+- feishu: 飞书优化格式（默认，避免 HTML、标题不超 3 级）
+
+**使用示例**
+- 从 Git 变更生成技术规范：git_mode="staged", doc_type="spec"
+- 从文件生成设计决策：inputs=["src/**/*.yml"], doc_type="decision"`,
+    DocumentSuggestInputSchema.shape,
+    async (params) => {
+        try {
+            const result = await executeDocumentSuggest(params);
+
+            // 构建返回消息
+            let message = `文档生成完成\n`;
+            message += `类型: ${result.result.doc_type}\n`;
+            message += `标题: ${result.result.title}\n`;
+            message += `Provider: ${result.result.meta.provider}\n`;
+            message += `耗时: ${result.result.meta.duration_ms}ms\n`;
+
+            return {
+                content: [
+                    { type: "text", text: message },
+                    { type: "text", text: result.document },
+                ],
+            };
+        } catch (error) {
+            const errorMessage =
+                error instanceof Error ? error.message : String(error);
+            return {
+                content: [{ type: "text", text: `文档生成失败: ${errorMessage}` }],
                 isError: true,
             };
         }

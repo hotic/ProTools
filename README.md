@@ -6,6 +6,7 @@
 
 - **代码合并**：将多个源文件合并为单一上下文，支持压缩模式
 - **AI 代码审查**：支持 OpenAI GPT-5.2 和 Google Gemini 3 Flash 双模型并发审查
+- **文档生成**：从代码/配置变更中提取隐含规范，生成技术规范、设计决策、变更日志
 - **异步任务**：长时间任务支持异步执行和轮询查询
 - **智能默认**：未指定审查目标时自动检测 Git 变更
 
@@ -67,6 +68,33 @@
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | `task_id` | `string` | 任务 ID |
+
+### `protools_document_suggest`
+
+从代码/配置变更中提取隐含规范，生成结构化文档。
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `cwd` | `string` | - | 工作目录 |
+| `inputs` | `string[]` | - | 文件/目录/glob 路径（与 git_mode 二选一） |
+| `git_mode` | `staged \| unstaged \| all` | - | Git diff 模式 |
+| `doc_type` | `spec \| decision \| changelog \| auto` | `auto` | 文档类型 |
+| `format` | `markdown \| feishu` | `feishu` | 输出格式 |
+| `language` | `zh \| en` | `zh` | 输出语言 |
+| `context` | `string` | - | 附加背景说明 |
+| `provider` | `openai \| gemini` | `gemini` | LLM Provider |
+| `extensions` | `string[]` | - | 过滤扩展名 |
+| `excludes` | `string[]` | - | 排除的 glob 模式 |
+
+**文档类型**：
+- `spec`：技术规范（配置格式、字段定义、约束规则）
+- `decision`：设计决策（技术选型、架构权衡）
+- `changelog`：变更日志（按类别分组的变更记录）
+- `auto`：自动推断最合适的类型
+
+**输出格式**：
+- `feishu`（默认）：针对飞书优化，避免 HTML，标题不超 3 级
+- `markdown`：标准 Markdown
 
 ## 环境变量配置
 
@@ -163,16 +191,21 @@ src/
 ├── tools/
 │   ├── merge-files.ts      # 合并文件工具
 │   ├── code-review.ts      # 代码审查工具
+│   ├── document-suggest.ts # 文档生成工具
 │   └── review/             # 审查子模块
 │       ├── task-store.ts   # 任务存储
 │       ├── report-generator.ts
 │       └── result-processor.ts
 ├── prompts/
-│   ├── review-prompt.ts    # Prompt 构建器
+│   ├── review-prompt.ts    # 审查 Prompt 构建器
+│   ├── document-prompt.ts  # 文档 Prompt 构建器
 │   └── templates/          # Prompt 模板
+│       ├── review.ts
+│       └── document.ts
 └── types/
     ├── merge.ts
-    └── review.ts
+    ├── review.ts
+    └── document.ts
 ```
 
 ## License
